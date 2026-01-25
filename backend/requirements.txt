@@ -5,3 +5,6 @@ pymupdf
 google-generativeai
 python-dotenv
 Pillow
+requests
+beautifulsoup4
+lxml

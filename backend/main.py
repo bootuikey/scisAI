@@ -29,10 +29,17 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 async def root():
     return FileResponse('static/index.html')
 
+from service.grobid_service import GrobidService
+
 @app.post("/analyze", response_model=AnalysisResult)
 async def analyze_pdf(file: UploadFile = File(...)):
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+
+    file_bytes = await file.read()
+
     # 1. Extract Text, Figures, and Formulas
-    text, figures, formulas = await PDFService.extract_content_from_pdf(file)
+    text, figures, formulas = await PDFService.extract_content_from_pdf(file_bytes)
     
     # 2. Call Gemini
     # Ensure API Key is set
@@ -41,6 +48,18 @@ async def analyze_pdf(file: UploadFile = File(...)):
     
     try:
         result = llm_service.analyze_content(text, figures, formulas, file.filename)
+        
+        # 3. Call Grobid for Reference Validation
+        try:
+            grobid_suggestions = GrobidService.process_references(file_bytes, file.filename)
+            if grobid_suggestions:
+                result.suggestions.extend(grobid_suggestions)
+                if not result.general_comments:
+                    result.general_comments = ""
+                result.general_comments += "\n\n**Reference Formatting Check (Grobid):** Checked references against style guidelines."
+        except Exception as grobid_error:
+            print(f"Grobid check failed: {grobid_error}")
+            
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

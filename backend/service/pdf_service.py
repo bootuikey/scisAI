@@ -6,12 +6,12 @@ from PIL import Image
 
 class PDFService:
     @staticmethod
-    async def extract_content_from_pdf(file: UploadFile) -> Tuple[str, List[Image.Image], List[Image.Image]]:
-        if file.content_type != "application/pdf":
-            raise HTTPException(status_code=400, detail="File must be a PDF")
+    async def extract_content_from_pdf(content: bytes) -> Tuple[str, List[Image.Image], List[Image.Image]]:
+        # if file.content_type != "application/pdf":
+        #    raise HTTPException(status_code=400, detail="File must be a PDF")
         
         try:
-            content = await file.read()
+            # content = await file.read()
             doc = fitz.open(stream=content, filetype="pdf")
             
             text_content = []
