@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 智能校验系统</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text: #1e293b;
+            --border: #e2e8f0;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding-top: 50px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background: var(--surface);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--primary);
+            font-weight: 700;
+            margin-bottom: 2rem;
+        }
+
+        .upload-section {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 3rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .upload-section:hover {
+            border-color: var(--primary);
+            background-color: #eff6ff;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .btn {
+            background-color: var(--primary);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .results {
+            margin-top: 2rem;
+        }
+
+        .suggestion-card {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-left: 4px solid #ef4444;
+        }
+
+        .issue-type {
+            font-size: 0.8em;
+            text-transform: uppercase;
+            color: #64748b;
+            font-weight: 700;
+        }
+
+        .original {
+            background-color: #fee2e2;
+            padding: 2px 4px;
+            border-radius: 4px;
+            text-decoration: line-through;
+        }
+
+        .suggestion {
+            background-color: #dcfce7;
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        
+        .loader {
+            display: none;
+            text-align: center;
+            margin: 2rem 0;
+        }
+
+        .general-comments {
+            background: #f0f9ff;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PDF 智能校验助手</h1>
+        
+        <div class="upload-section" id="dropZone" onclick="document.getElementById('fileInput').click()">
+            <p>点击或拖拽 PDF 文件到此处上传</p>
+            <input type="file" id="fileInput" accept=".pdf">
+            <p id="fileName" style="font-weight: 600; margin-top: 10px;"></p>
+        </div>
+        
+        <div style="text-align: center;">
+            <button class="btn" id="analyzeBtn" onclick="uploadAndAnalyze()" disabled>开始分析</button>
+        </div>
+
+        <div class="loader" id="loader">
+            <p>正在请求大模型分析，请耐心等待...</p>
+        </div>
+
+        <div class="results" id="results"></div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const fileNameDisplay = document.getElementById('fileName');
+        let selectedFile = null;
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                selectedFile = e.target.files[0];
+                fileNameDisplay.textContent = selectedFile.name;
+                analyzeBtn.disabled = false;
+            }
+        });
+
+        async function uploadAndAnalyze() {
+            if (!selectedFile) return;
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('results').innerHTML = '';
+            analyzeBtn.disabled = true;
+
+            try {
+                // If running on same port/domain, relative path works
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Analysis failed');
+                }
+
+                const data = await response.json();
+                renderResults(data);
+            } catch (error) {
+                alert('详细错误: ' + error.message);
+            } finally {
+                document.getElementById('loader').style.display = 'none';
+                analyzeBtn.disabled = false;
+            }
+        }
+
+        function renderResults(data) {
+            const container = document.getElementById('results');
+            
+            if (data.general_comments) {
+                const commentDiv = document.createElement('div');
+                commentDiv.className = 'general-comments';
+                commentDiv.innerHTML = `<h3>整体建议</h3><p>${data.general_comments}</p>`;
+                container.appendChild(commentDiv);
+            }
+
+            if (data.suggestions.length === 0) {
+                container.innerHTML += '<p style="text-align:center; color:green;">完美！未发现明显问题。</p>';
+                return;
+            }
+
+            data.suggestions.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'suggestion-card';
+                card.innerHTML = `
+                    <span class="issue-type">${item.issue_type}</span>
+                    <p><strong>原文:</strong> <span class="original">${item.original_text}</span></p>
+                    <p><strong>建议:</strong> <span class="suggestion">${item.suggestion}</span></p>
+                    <p style="font-size: 0.9em; color: #475569;">${item.description}</p>
+                `;
+                container.appendChild(card);
+            });
+        }
+    </script>
+</body>
+</html>
