@@ -31,7 +31,7 @@ class LLMService:
         prompt_text = f"""
         **第一部分：文本分析**
         待分析文本片段:
-        {text[:20000]}
+        {text[:50000]}
         
         要求：
         - 检查行文是否清晰流畅。
@@ -83,24 +83,25 @@ class LLMService:
             # Append Figures
             if figures:
                 content_payload.append("\n\n【以下是提取的插图/图片】：")
-                # Limit to first 5 figures to avoid overload
-                content_payload.extend(figures[:5])
-                if len(figures) > 5:
-                    content_payload.append(f"(注：插图过多，仅展示前5张，共 {len(figures)} 张)")
+                # Limit to first 15 figures to avoid overload
+                content_payload.extend(figures[:15])
             else:
                 content_payload.append("\n\n(未提取到插图)")
 
             # Append Formulas
             if formulas:
                 content_payload.append("\n\n【以下是提取的公式截图】：")
-                # Limit to first 10 formulas (formulas are small)
-                content_payload.extend(formulas[:10])
-                if len(formulas) > 10:
-                    content_payload.append(f"(注：公式过多，仅展示前10个，共 {len(formulas)} 个)")
+                # Limit to first 100 formulas (formulas are small)
+                content_payload.extend(formulas[:100])
             else:
                 content_payload.append("\n\n(未检测到独立公式块)")
 
-            response = model.generate_content(content_payload)
+            response = model.generate_content(
+                content_payload,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.0
+                )
+            )
             
             # Cleanup potential markdown ticks
             clean_text = response.text.replace("```json", "").replace("```", "").strip()

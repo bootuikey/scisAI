@@ -30,6 +30,7 @@ async def root():
     return FileResponse('static/index.html')
 
 from service.grobid_service import GrobidService
+from service.metadata_service import MetadataService
 
 @app.post("/analyze", response_model=AnalysisResult)
 async def analyze_pdf(file: UploadFile = File(...)):
@@ -59,6 +60,14 @@ async def analyze_pdf(file: UploadFile = File(...)):
                 result.general_comments += "\n\n**Reference Formatting Check (Grobid):** Checked references against style guidelines."
         except Exception as grobid_error:
             print(f"Grobid check failed: {grobid_error}")
+
+        # 4. Call Metadata Check (Rule Based)
+        try:
+            metadata_suggestions = MetadataService.check_metadata(file_bytes)
+            if metadata_suggestions:
+                result.suggestions.extend(metadata_suggestions)
+        except Exception as meta_error:
+            print(f"Metadata check failed: {meta_error}")
             
         return result
     except Exception as e:

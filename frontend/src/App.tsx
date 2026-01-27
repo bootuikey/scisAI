@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Upload, FileText, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertTriangle, Loader2, Download } from 'lucide-react';
 import { analyzePDF } from './api';
 import type { AnalysisResult } from './types';
+import * as XLSX from 'xlsx';
 import './index.css';
 
 function App() {
@@ -39,6 +40,48 @@ function App() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleExport = () => {
+    if (!result) return;
+
+    const wb = XLSX.utils.book_new();
+
+    // 1. Suggestions Sheet
+    const suggestionsData = result.suggestions.map(item => ({
+      "Issue Type": item.issue_type,
+      "Original Text": item.original_text,
+      "Suggestion": item.suggestion,
+      "Description": item.description
+    }));
+
+    if (suggestionsData.length > 0) {
+      const wsSuggestions = XLSX.utils.json_to_sheet(suggestionsData);
+      // Set column widths
+      const colWidths = [
+        { wch: 15 }, // Issue Type
+        { wch: 40 }, // Original Text
+        { wch: 40 }, // Suggestion
+        { wch: 50 }, // Description
+      ];
+      wsSuggestions['!cols'] = colWidths;
+      XLSX.utils.book_append_sheet(wb, wsSuggestions, "Suggestions");
+    }
+
+    // 2. General Comments Sheet
+    if (result.general_comments) {
+      // Split comments by double newline to separate paragraphs for better readability in Excel cells, 
+      // or just put it all in one big cell. Let's put it in one cell for now but wrap text.
+      const wsComments = XLSX.utils.aoa_to_sheet([
+        ["General Analysis Comments"],
+        [result.general_comments]
+      ]);
+
+      wsComments['!cols'] = [{ wch: 100 }];
+      XLSX.utils.book_append_sheet(wb, wsComments, "General Analysis");
+    }
+
+    XLSX.writeFile(wb, `${result.filename || 'analysis'}_report.xlsx`);
   };
 
   return (
@@ -146,6 +189,30 @@ function App() {
         {/* Results Section */}
         {result && !isLoading && (
           <div className="results-container" style={{ animation: 'fadeIn 0.5s ease-out' }}>
+
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              marginBottom: '1rem'
+            }}>
+              <button
+                onClick={handleExport}
+                style={{
+                  background: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '0.6rem 1.2rem',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontWeight: 600
+                }}
+              >
+                <Download size={16} /> Export Report (Excel)
+              </button>
+            </div>
 
             {/* General Comments */}
             {result.general_comments && (
