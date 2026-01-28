@@ -95,10 +95,43 @@ class GrobidService:
              # Fallback if no analytic
              pass
              
-        # Check Author Format
-        author_names = []
-        invalid_format_authors = []
+        # 1. Author Validation
+        # Rule: Surname full, First name initial only. Keep first 3, >3 add "et al."
         
+        analytic = ref_xml.find('analytic')
+        monogr = ref_xml.find('monogr')
+        
+        authors = []
+        if analytic:
+            authors.extend(analytic.find_all('author'))
+        if monogr:
+            authors.extend(monogr.find_all('author'))
+            
+        # Deduplicate if needed (simple check)
+        if not authors and monogr:
+             pass
+
+        # Check Author Count
+        if len(authors) > 3:
+             # Construct list of first 3 for suggestion
+             display_authors = []
+             for a in authors[:3]:
+                 s = a.find('surname').text if a.find('surname') else ""
+                 f = a.find('forename').text if a.find('forename') else ""
+                 f_init = f[0] if f else ""
+                 display_authors.append(f"{s} {f_init}")
+             
+             suggestion_text = ", ".join(display_authors) + ", et al."
+             
+             suggestions.append({
+                "original_text": f"Ref #{index} Authors count: {len(authors)}",
+                "issue_type": "format",
+                "description": "More than 3 authors listed.",
+                "suggestion": f"Keep only the first 3 authors and add ', et al.' (e.g. {suggestion_text})"
+            })
+            
+        # Check Author Name Format
+        invalid_format_authors = []
         for author in authors:
             persName = author.find('persName')
             if not persName: continue
@@ -109,35 +142,22 @@ class GrobidService:
             s_text = surname.text if surname else ""
             f_text = forename.text if forename else ""
             
-            author_names.append(f"{s_text} {f_text}")
-            
-            # Check: First name initial only
-            # If forename is longer than 2 chars and doesn't end with dot, or just longer than 1 char (ignoring dot)
-            # Example "John" -> Invalid. "J." -> Valid. "J" -> Valid? usually "J."
-            if len(f_text) > 2 and not f_text.endswith('.'):
-                 invalid_format_authors.append(f"{f_text} {s_text}")
-            elif len(f_text) > 1 and f_text[-1] != '.':
-                 # Potentially "Jo" - vague. Let's strict check: "First name initial only".
-                 # So "J" or "J." is ok. "John" is not.
-                 if len(f_text) > 1: # e.g. "John"
-                    invalid_format_authors.append(f"{f_text} {s_text}")
+            # Rule: First name only initial
+            # We assume "Surname G" style (no dot preferably, or just length 1)
+            # If the user explicitly wants "Surname G", "G." is acceptable as initial usually, 
+            # but if validation is strict 'only first letter', we check length.
+            # We'll flag full names.
+            f_clean = f_text.replace('.', '').strip()
+            if len(f_clean) > 1:
+                 # It's a full name like "George"
+                 invalid_format_authors.append(f"{s_text} {f_text}")
 
         if invalid_format_authors:
             suggestions.append({
-                "original_text": f"Ref #{index} Authors: " + ", ".join(invalid_format_authors),
+                "original_text": ", ".join(invalid_format_authors[:3]),
                 "issue_type": "format",
-                "description": "Authors should use full surname and initial-only first name.",
-                "suggestion": "Change first names to initials (e.g., 'John Smith' -> 'Smith, J.')."
-            })
-
-        # Check: Keep first 3 authors, >3 et al.
-        # We can only check if we HAVE > 3 authors.
-        if len(authors) > 3:
-            suggestions.append({
-                "original_text": f"Ref #{index} (Authors count: {len(authors)})",
-                "issue_type": "clarity",
-                "description": "More than 3 authors listed.",
-                "suggestion": f"Keep only the first 3 authors and add 'et al.' (e.g. {author_names[0]}, {author_names[1]}, {author_names[2]} et al.)"
+                "description": "Authors should use full surname and first name initial only.",
+                "suggestion": "Change first names to initials (e.g., 'Surname G')."
             })
 
         # 2. Title Validation
@@ -150,69 +170,84 @@ class GrobidService:
             
         if title_node:
             title_text = title_node.text.strip()
-            # Simple heuristic for Sentence case
-            # Split by space. Check words after the first one.
-            # Ignore proper nouns? Hard to detect without NLP.
-            # But the rule says "Title only first word first letter uppercase". Strict rule.
-            # We will check if Words[1:] start with Uppercase.
-            
             words = title_text.split()
             suspicious_caps = []
+            
+            # Check first word capitalization
+            if words and len(words[0]) > 0 and not words[0][0].isupper():
+                 suggestions.append({
+                    "original_text": words[0],
+                    "issue_type": "format",
+                    "description": "Title should start with an uppercase letter.",
+                    "suggestion": f"Capitalize '{words[0]}'."
+                })
+
+            # Check subsequent words (Sentence case)
             if len(words) > 1:
                 for w in words[1:]:
                     # Remove punctuation for check
                     clean_w = re.sub(r'[^\w\s]', '', w)
                     if not clean_w: continue
-                    if clean_w[0].isupper() and len(clean_w) > 1:
-                        # Exclude likely acronyms/formulas if possible, but rule is strict.
-                        # We'll flag it as potential issue.
+                    # Rule: Only first word's first letter uppercase. 
+                    if clean_w[0].isupper():
+                        # We might flag proper nouns, but the rule is strict.
                         suspicious_caps.append(w)
             
             if suspicious_caps:
                  suggestions.append({
                     "original_text": title_text,
                     "issue_type": "format",
-                    "description": "Title should be in sentence case (only first word capitalized, barring proper nouns).",
-                    "suggestion": "Lower-case the following words if they are not proper nouns: " + ", ".join(suspicious_caps[:5])
+                    "description": "Title should be in sentence case (only first word capitalized).",
+                    "suggestion": "Lower-case the following words: " + ", ".join(suspicious_caps[:5])
                 })
 
         # 3. Journal/Conference Validation
-        # Rule: Journal Name -> Initial caps (Title Case). Conference -> "In: Proceedings of..."
-        # Rule: Journal Name -> Preferably abbreviated. (Hard to check preference, but can check Case)
+        # Rule: Journal Name -> Capitalized first letters (Title Case).
+        # Rule: Conference Name -> Capitalized first letters, prefixed with "In: Proceedings of"
         
-        venue_title = None
+        venue_node = None
         if monogr:
-             # Journal title
-             j_title = monogr.find('title', level="j")
-             if j_title:
-                 venue_text = j_title.text.strip()
-                 # Check Title Case
-                 # If many words are lowercase, flag it.
-                 words = venue_text.split()
-                 lower_words = [w for w in words if w[0].islower() and w not in ['of', 'the', 'in', 'and', 'for', 'on', 'to']]
-                 if len(lower_words) > 0:
-                      suggestions.append({
-                        "original_text": venue_text,
-                        "issue_type": "format",
-                        "description": "Journal name should be Capitalized (Title Case).",
-                        "suggestion": f"Capitalize: {', '.join(lower_words)}"
-                    })
-                 
-                 # Check Abbreviation (heuristic: look for dots? or length?)
-                 # "Use abbreviation" is a "preference". Maybe skip strict check unless obvious.
+             # Try to find journal title or meeting title
+             venue_node = monogr.find('title', level="j") or monogr.find('title', level="m")
         
-        # Conference Check? Grobid might classify as <title level="m"> or "j".
-        # If it looks like a conference (contains "Proc", "Conference", "Symposium")
-        # Check if it starts with "In: Proceedings of"
-        # Since Grobid parses the title, it might strip "In:". We check the raw context or just Suggest it.
-        # Actually checking strict "In: Proceedings of" prefix on a parsed field is tricky because Grobid extracts the *Name*.
-        # We'd ideally want to see the prefix text. 
-        # But if the Venue Name itself is "Proceedings of...", we can check.
-        # If the user means "The citation string should contain In: Proceedings of...", we might miss it if Grobid stripped it.
-        # We will skip strict "In:" check unless we have raw text, but we can check the capitalized words for Conference names.
+        if venue_node:
+             venue_text = venue_node.text.strip()
+             
+             # Check Title Case
+             words = venue_text.split()
+             lower_words = [w for w in words if w[0].islower() and w.lower() not in ['of', 'the', 'in', 'and', 'for', 'on', 'to', 'at', 'by']]
+             if lower_words:
+                  suggestions.append({
+                    "original_text": venue_text,
+                    "issue_type": "format",
+                    "description": "Journal/Conference name should have capitalized first letters (Title Case).",
+                    "suggestion": f"Capitalize: {', '.join(lower_words)}"
+                })
+        
+             # Check for Conference "In: Proceedings of"
+             # Heuristic: keywords
+             is_conference = any(k in venue_text.lower() for k in ['proceeding', 'conference', 'symposium', 'workshop'])
+             
+             if is_conference:
+                # Need to check if "In: Proceedings of" is present.
+                pass # Logic continues below based on raw text if possible or just reminding.
+                
+                # Check using raw_reference if captured by Grobid
+                raw_ref_node = ref_xml.find('note', type='raw_reference')
+                raw_ref = raw_ref_node.text.strip() if raw_ref_node else ""
+                
+                if raw_ref and "In: Proceedings of" not in raw_ref:
+                     suggestions.append({
+                        "original_text": "Conference Ref",
+                        "issue_type": "format",
+                        "description": "Conference papers should be prefixed with 'In: Proceedings of'.",
+                        "suggestion": "Ensure the citation includes 'In: Proceedings of' before the conference name."
+                    })
 
         # 4. Citation Validation
         # Rule: Year, Vol: Page. No Issue.
+        # 4. Imprint Validation
+        # Rule: Year, Vol: Page. No Issue. No trailing dot.
         imprint = monogr.find('imprint') if monogr else None
         if imprint:
             # Check Issue
@@ -221,23 +256,31 @@ class GrobidService:
                 suggestions.append({
                     "original_text": f"Issue: {issue.text}",
                     "issue_type": "format",
-                    "description": "Issue number found.",
-                    "suggestion": "Remove the issue number. Format should be: Year, Volume: Page."
+                    "description": "Issue number shouldn't be included.",
+                    "suggestion": "Remove the issue number."
                 })
             
-            # Check Format: Vol: Page
+            # Check Volume
             vol = imprint.find('biblScope', unit="volume")
-            page = imprint.find('biblScope', unit="page")
-            year = imprint.find('date', type="published")
-            
-            # If we have Vol and Page, we can't easily check the colon punctuation in extracted XML.
-            # But we can verify their existence.
-            if not vol and j_title: # Journals usually need volume
+            # If Journal, Volume is expected usually.
+            if not vol and venue_node: 
                  suggestions.append({
-                    "original_text": f"Ref #{index} (Journal)",
+                    "original_text": "Missing Volume",
                     "issue_type": "missing_info",
-                    "description": "Missing Volume number.",
-                    "suggestion": "Ensure Volume number is included."
+                    "description": "Volume number is missing.",
+                    "suggestion": "Add Volume number (e.g. Year, Volume: Page)."
                 })
+
+            # Check for trailing dot in raw reference
+            raw_ref_node = ref_xml.find('note', type='raw_reference')
+            if raw_ref_node:
+                raw_text = raw_ref_node.text.strip()
+                if raw_text.endswith('.'):
+                    suggestions.append({
+                        "original_text": "Trailing dot detected",
+                        "issue_type": "format",
+                        "description": "Reference should not end with a dot.",
+                        "suggestion": "Remove the final period."
+                    })
 
         return suggestions

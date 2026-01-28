@@ -68,6 +68,15 @@ async def analyze_pdf(file: UploadFile = File(...)):
                 result.suggestions.extend(metadata_suggestions)
         except Exception as meta_error:
             print(f"Metadata check failed: {meta_error}")
+
+        # 5. Call Visual Check (Figures, Colors)
+        from service.visual_check_service import VisualCheckService
+        try:
+            visual_suggestions = VisualCheckService.check_visuals(file_bytes)
+            if visual_suggestions:
+                result.suggestions.extend(visual_suggestions)
+        except Exception as visual_error:
+            print(f"Visual check failed: {visual_error}")
             
         return result
     except Exception as e:

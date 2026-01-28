@@ -141,5 +141,121 @@ class MetadataService:
                 description=f"Missing required metadata components for {article_type}.",
                 suggestion=f"Please ensure the following are present: {', '.join(missing_components)}"
             ))
+
+        # 3. Reference Analysis (Count, Order, Usage)
+        
+        # Extract full text for reference analysis
+        full_text = ""
+        for page in doc:
+            full_text += page.get_text()
             
+        # Locate References Section
+        # Improved regex to handle "References", "Bibliography", "Literature Cited", with optional numbering (e.g. "6. References")
+        ref_header_pattern = r'(?i)(\n|^)\s*(\d+(\.\d+)*\.?\s*)?(references|bibliography|literature\s*cited|works\s*cited)\s*(\n|$)'
+        matches = list(re.finditer(ref_header_pattern, full_text))
+        
+        body_text = full_text
+        ref_text = ""
+        ref_count = 0
+        
+        if matches:
+            last_match = matches[-1]
+            body_text = full_text[:last_match.start()]
+            ref_text = full_text[last_match.end():]
+            
+            # Count References
+            brackets_pattern = r'^\s*\[\d+\]'
+            dot_pattern = r'^\s*\d+\.'
+            
+            ref_items_brackets = re.findall(brackets_pattern, ref_text, re.MULTILINE)
+            ref_items_dots = re.findall(dot_pattern, ref_text, re.MULTILINE)
+            
+            ref_count = max(len(ref_items_brackets), len(ref_items_dots))
+            
+        # Rule: MOOP/LETTER Reference Count Limit
+        if article_type in ["MOOP", "LETTER"]:
+            if ref_count > 5:
+                suggestions.append(Suggestion(
+                    original_text=f"Total References: {ref_count}",
+                    issue_type="compliance_warning",
+                    description=f"{article_type} articles are limited to 5 references (found {ref_count}).",
+                    suggestion="Please reduce the reference count to 5 or fewer."
+                ))
+                
+        # Rule: Citation Order
+        # We run this check on body_text (or full_text if header missing)
+        # Check sequence
+        citation_pattern = r'\[\s*([0-9,\s\-\u2013]+)\s*\]'
+        cited_numbers = []
+        max_seen = 0
+        order_issues = []
+        
+        # Determine text to check. If we found a split, use body_text. If not, use full_text but be careful.
+        # Actually, using full_text is safe for "skipping ahead" checks because ref list usually resets to 1 or continues current count.
+        # But scanning body_text is safer to avoid noise.
+        text_to_scan_citations = body_text
+        
+        for match in re.finditer(citation_pattern, text_to_scan_citations):
+            content = match.group(1)
+            parts = content.split(',')
+            current_batch = []
+            
+            for part in parts:
+                part = part.strip()
+                if not part: continue
+                # Handle ranges
+                if '-' in part or '\u2013' in part:
+                    range_parts = re.split(r'[-\u2013]', part)
+                    if len(range_parts) >= 2:
+                        try:
+                            start = int(range_parts[0].strip())
+                            end = int(range_parts[-1].strip())
+                            for k in range(start, end + 1):
+                                current_batch.append(k)
+                        except ValueError: pass
+                else:
+                    try:
+                        current_batch.append(int(part))
+                    except ValueError: pass
+            
+            for num in current_batch:
+                # If we skipped a number (e.g. 1 -> 3), flag it.
+                # Allow starting with > 1? Usually citations start at 1.
+                # If max_seen is 0, and num is 1, ok. If num is 2, it skipped 1.
+                if num > max_seen + 1:
+                    msg = f"Ref [{num}] cited before [{max_seen + 1}]"
+                    if msg not in order_issues:
+                        order_issues.append(msg)
+                
+                if num > max_seen:
+                    max_seen = num
+                cited_numbers.append(num)
+        
+        if order_issues:
+             suggestions.append(Suggestion(
+                original_text="Citation Order",
+                issue_type="sequence_error",
+                description="Citations should appear in numerical order. Found issues: " + "; ".join(order_issues[:3]) + ("..." if len(order_issues)>3 else ""),
+                suggestion="Ensure references are numbered in order of appearance."
+            ))
+        
+        # Rule: Uncited References
+        # Only possible if we successfully counted references in verification
+        if ref_count > 0:
+            cited_set = set(cited_numbers)
+            all_refs = set(range(1, ref_count + 1))
+            uncited = sorted(list(all_refs - cited_set))
+            
+            if uncited:
+                uncited_str = ", ".join(map(str, uncited))
+                description = f"References not cited in text: [{uncited_str}]"
+                if len(description) > 200: description = description[:197] + "..."
+                
+                suggestions.append(Suggestion(
+                    original_text="Uncited References",
+                    issue_type="content_mismatch",
+                    description=description,
+                    suggestion="Remove uncited references or cite them in the text."
+                ))
+
         return suggestions
