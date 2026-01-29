@@ -65,8 +65,20 @@ class PDFService:
                     #    if indent_left > 50 and indent_right > 50: is_formula_candidate = True
                     
                     if is_formula_candidate:
-                        # Padding for cleaner crop
+                        # Padding for cleaner crop and to include trailing punctuation
                         r = fitz.Rect(b["bbox"])
+                        
+                        # Expand the capture area. 
+                        # Critical fix: Often trailing commas/periods are cut off if the bbox is too tight.
+                        # We add more padding to the right (x1) to capture them.
+                        r.x0 -= 5
+                        r.y0 -= 5
+                        r.x1 += 15 # Extra padding on right for punctuation
+                        r.y1 += 5
+
+                        # Ensure we don't go out of page bounds
+                        r = r & page.rect
+                        
                         # Zoom in for clear formula recognition
                         pix = page.get_pixmap(clip=r, matrix=fitz.Matrix(3, 3)) 
                         img_data = pix.tobytes("png")
