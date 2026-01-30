@@ -39,8 +39,8 @@ async def analyze_pdf(file: UploadFile = File(...)):
 
     file_bytes = await file.read()
 
-    # 1. Extract Text, Figures, and Formulas
-    text, figures, formulas = await PDFService.extract_content_from_pdf(file_bytes)
+    # 1. Extract Text, Figures, Formulas, and Tables
+    text, figures, formulas, tables = await PDFService.extract_content_from_pdf(file_bytes)
     
     # 2. Call Gemini
     # Ensure API Key is set
@@ -48,7 +48,7 @@ async def analyze_pdf(file: UploadFile = File(...)):
          raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured on server.")
     
     try:
-        result = llm_service.analyze_content(text, figures, formulas, file.filename)
+        result = llm_service.analyze_content(text, figures, formulas, tables, file.filename)
         
         # 3. Call Grobid for Reference Validation
         try:

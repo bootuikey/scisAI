@@ -3,10 +3,11 @@ from fastapi import UploadFile, HTTPException
 from typing import Tuple, List
 import io
 from PIL import Image
+import pdfplumber
 
 class PDFService:
     @staticmethod
-    async def extract_content_from_pdf(content: bytes) -> Tuple[str, List[Image.Image], List[Image.Image]]:
+    async def extract_content_from_pdf(content: bytes) -> Tuple[str, List[Image.Image], List[Image.Image], List[Image.Image]]:
         # if file.content_type != "application/pdf":
         #    raise HTTPException(status_code=400, detail="File must be a PDF")
         
@@ -17,8 +18,12 @@ class PDFService:
             text_content = []
             figures = []
             formulas = []
+            tables = []
             
-            for page in doc:
+            # Open with pdfplumber for table detection
+            pdf_plumber = pdfplumber.open(io.BytesIO(content))
+            
+            for page_index, page in enumerate(doc):
                 # 1. Extract Text
                 text_content.append(page.get_text())
                 
@@ -84,12 +89,40 @@ class PDFService:
                         img_data = pix.tobytes("png")
                         formulas.append(Image.open(io.BytesIO(img_data)))
 
+                # 4. Extract Tables (pdfplumber + screenshot)
+                try:
+                    p_plumber = pdf_plumber.pages[page_index]
+                    found_tables = p_plumber.find_tables()
+                    
+                    for table in found_tables:
+                        bbox = table.bbox
+                        if not bbox: continue
+                        
+                        # Convert bbox to fitz Rect
+                        # pdfplumber bbox is (x0, top, x1, bottom)
+                        r = fitz.Rect(bbox)
+                         # Add padding
+                        r.x0 -= 2
+                        r.y0 -= 2
+                        r.x1 += 2
+                        r.y1 += 2
+                        r = r & page.rect
+                        
+                        pix = page.get_pixmap(clip=r, matrix=fitz.Matrix(3, 3))
+                        img_data = pix.tobytes("png")
+                        tables.append(Image.open(io.BytesIO(img_data)))
+                except Exception as e:
+                     # Ignore individual table extraction errors
+                     pass
+
+            pdf_plumber.close()
+
             full_text = "\n".join(text_content)
             
-            if not full_text.strip() and not figures and not formulas:
+            if not full_text.strip() and not figures and not formulas and not tables:
                  raise HTTPException(status_code=400, detail="Could not extract content from PDF")
                  
-            return full_text, figures, formulas
+            return full_text, figures, formulas, tables
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")

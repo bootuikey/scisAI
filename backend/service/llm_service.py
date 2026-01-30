@@ -14,7 +14,7 @@ class LLMService:
         else:
             genai.configure(api_key=api_key)
             
-    def analyze_content(self, text: str, figures: List[Image.Image], formulas: List[Image.Image], filename: str) -> AnalysisResult:
+    def analyze_content(self, text: str, figures: List[Image.Image], formulas: List[Image.Image], tables: List[Image.Image], filename: str) -> AnalysisResult:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
              raise Exception("GEMINI_API_KEY environment variable not found.")
@@ -25,7 +25,8 @@ class LLMService:
         你是一位严谨的SCI学术期刊编辑。请对提供的PDF内容（文本、插图、公式截图）进行全面审查。
         
         任务说明：
-        请结合以下三个部分的内容进行分析：
+        任务说明：
+        请结合以下四个部分的内容进行分析：
         """
 
         prompt_text = f"""
@@ -43,6 +44,7 @@ class LLMService:
         要求：
         - **视觉扫描**：请仔细扫描每一个插图、照片或统计图表。
         - **版权隐私（高优先级）**：若图片中包含人物肖像（Portrait）、电影剧照、知名商标或商业宣传图，**必须**在建议中明确指出“该图片可能涉及版权或肖像权问题，需确认是否已获得授权”。
+        - **颜色检查**：检查图中的文字和线条是否使用了**浅色**（如黄色、淡蓝色、淡绿色等），这可能会导致打印不清。如果发现，请作为“compliance_warning”提出。
         - **格式规范**：检查图例（Legend）或标题（Caption），短语仅首个单词首字母大写；若是完整句子，需符合英文书写规范（首字母大写，结尾标点）。
         - **数据图表**：对于数据图（Data Chart），检查横纵坐标是否有明确的变量名（Label）或单位（Unit）。
         """
@@ -55,6 +57,13 @@ class LLMService:
         - **符号一致性**：检查公式中的符号与正文、图片/图表中的符号格式是否一致。
           - 例如：变量通常应为textit（斜体），矢量通常为bold（粗体）。
           - 检查上下角标是否统一。
+        """
+
+        prompt_tables = """
+        **第四部分：表格分析**（请参考后续附带的【表格截图】）
+        要求：
+        - **彩色内容检查**：严格检查表格中的文字、线条或背景是否使用了**彩色**（非黑白灰）。表格内容（包括表头、数据、边框）原则上应为黑白或灰度。如果发现彩色，请务必提出警示。
+        - **浅色内容检查**：检查表格中是否存在**浅色**（如黄色、淡蓝色）的文字或线条，这种颜色打印时极难辨认。
         """
 
         prompt_json = """
@@ -78,7 +87,7 @@ class LLMService:
         
         try:
             # Construct the complex multimodal payload
-            content_payload = [prompt_intro, prompt_text, prompt_figures, prompt_formulas, prompt_json]
+            content_payload = [prompt_intro, prompt_text, prompt_figures, prompt_formulas, prompt_tables, prompt_json]
             
             # Append Figures
             if figures:
@@ -95,6 +104,14 @@ class LLMService:
                 content_payload.extend(formulas[:100])
             else:
                 content_payload.append("\n\n(未检测到独立公式块)")
+
+            # Append Tables
+            if tables:
+                content_payload.append("\n\n【以下是提取的表格截图】：")
+                # Limit to first 20 tables
+                content_payload.extend(tables[:20])
+            else:
+                content_payload.append("\n\n(未检测到表格)")
 
             response = model.generate_content(
                 content_payload,
