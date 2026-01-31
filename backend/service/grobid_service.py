@@ -143,12 +143,17 @@ class GrobidService:
             f_text = forename.text if forename else ""
             
             # Rule: First name only initial
-            # We assume "Surname G" style (no dot preferably, or just length 1)
-            # If the user explicitly wants "Surname G", "G." is acceptable as initial usually, 
-            # but if validation is strict 'only first letter', we check length.
-            # We'll flag full names.
-            f_clean = f_text.replace('.', '').strip()
-            if len(f_clean) > 1:
+            # Allow multiple initials (e.g. "Z. Y." or "Z Y")
+            is_full_name = False
+            # Split by common delimiters (space, dot, hyphen)
+            parts = re.split(r'[\s\-\.]+', f_text)
+            for p in parts:
+                if not p: continue
+                if len(p) > 1:
+                    is_full_name = True
+                    break
+
+            if is_full_name:
                  # It's a full name like "George"
                  invalid_format_authors.append(f"{s_text} {f_text}")
 
@@ -156,8 +161,8 @@ class GrobidService:
             suggestions.append({
                 "original_text": ", ".join(invalid_format_authors[:3]),
                 "issue_type": "format",
-                "description": "Authors should use full surname and first name initial only.",
-                "suggestion": "Change first names to initials (e.g., 'Surname G')."
+                "description": "Authors should use full surname and first name initials only.",
+                "suggestion": "Change first names to initials (e.g., 'Surname G' or 'Surname G Y')."
             })
 
         # 2. Title Validation
