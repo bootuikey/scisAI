@@ -32,7 +32,7 @@ class LLMService:
         prompt_text = f"""
         **第一部分：文本分析**
         待分析文本片段:
-        {text[:50000]}
+        {text[:100000]}
         
         要求：
         - 检查行文是否清晰流畅。
@@ -116,7 +116,8 @@ class LLMService:
             response = model.generate_content(
                 content_payload,
                 generation_config=genai.types.GenerationConfig(
-                    temperature=0.0
+                    temperature=0.0,
+                    max_output_tokens=8192
                 )
             )
             

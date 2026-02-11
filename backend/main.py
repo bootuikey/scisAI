@@ -51,6 +51,7 @@ async def analyze_pdf(file: UploadFile = File(...)):
         result = llm_service.analyze_content(text, figures, formulas, tables, file.filename)
         
         # 3. Call Grobid for Reference Validation
+        '''
         try:
             grobid_suggestions = GrobidService.process_references(file_bytes, file.filename)
             if grobid_suggestions:
@@ -60,6 +61,7 @@ async def analyze_pdf(file: UploadFile = File(...)):
                 result.general_comments += "\n\n**Reference Formatting Check (Grobid):** Checked references against style guidelines."
         except Exception as grobid_error:
             print(f"Grobid check failed: {grobid_error}")
+        '''
 
         # 4. Call Metadata Check (Rule Based)
         try:
